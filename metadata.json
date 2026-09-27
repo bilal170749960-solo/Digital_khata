@@ -1,0 +1,6 @@
+{
+  "name": "Digital Khata",
+  "description": "Monthly digital khata system with Shopkeeper and Customer apps, ledger tracking, payment requests, and real-time balance calculations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

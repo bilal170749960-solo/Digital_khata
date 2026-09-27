@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isShopkeeper() {
+      return isAuthenticated() && getUserData().role == 'shopkeeper';
+    }
+
+    function isCustomer() {
+      return isAuthenticated() && getUserData().role == 'customer';
+    }
+
+    // 1. Users collection: users/{userId}
+    match /users/{userId} {
+      // Users can read and write only their own profile
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isShopkeeper());
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+
+      // Connected Khatas subcollection for Customers: users/{userId}/connectedKhatas/{connectionId}
+      match /connectedKhatas/{connectionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Notifications subcollection: users/{userId}/notifications/{notificationId}
+      match /notifications/{notificationId} {
+        allow read, write: if isOwner(userId);
+        // Allow system / shopkeeper to create notifications for this user
+        allow create: if isAuthenticated();
+      }
+    }
+
+    // 2. Shops collection: shops/{shopkeeperUid}
+    match /shops/{shopkeeperUid} {
+      // Any authenticated user can read basic shop profile
+      allow read: if isAuthenticated();
+      allow write: if isOwner(shopkeeperUid);
+
+      // QR Linking Sessions: shops/{shopkeeperUid}/qrLinkingSessions/{sessionId}
+      match /qrLinkingSessions/{sessionId} {
+        // Authenticated customer can read to verify QR token and update to mark as used
+        allow read: if isAuthenticated();
+        allow create: if isOwner(shopkeeperUid);
+        allow update: if isAuthenticated();
+        allow delete: if isOwner(shopkeeperUid);
+      }
+
+      // Customers subcollection: shops/{shopkeeperUid}/customers/{customerId}
+      match /customers/{customerId} {
+        // Shopkeeper can manage all their customers
+        // Connected customer can read if their UID is linked
+        allow read: if isOwner(shopkeeperUid) || (isAuthenticated() && resource.data.linkedCustomerUid == request.auth.uid);
+        allow create: if isOwner(shopkeeperUid);
+        allow update: if isOwner(shopkeeperUid) || (isAuthenticated() && (resource.data.linkedCustomerUid == null || resource.data.linkedCustomerUid == request.auth.uid));
+        allow delete: if isOwner(shopkeeperUid);
+
+        // Khata item entries: shops/{shopkeeperUid}/customers/{customerId}/khataEntries/{entryId}
+        match /khataEntries/{entryId} {
+          allow read: if isOwner(shopkeeperUid) || (isAuthenticated() && get(/databases/$(database)/documents/shops/$(shopkeeperUid)/customers/$(customerId)).data.linkedCustomerUid == request.auth.uid);
+          allow write: if isOwner(shopkeeperUid);
+        }
+
+        // Monthly bills: shops/{shopkeeperUid}/customers/{customerId}/monthlyBills/{billId}
+        match /monthlyBills/{billId} {
+          allow read: if isOwner(shopkeeperUid) || (isAuthenticated() && get(/databases/$(database)/documents/shops/$(shopkeeperUid)/customers/$(customerId)).data.linkedCustomerUid == request.auth.uid);
+          allow write: if isOwner(shopkeeperUid);
+        }
+
+        // Payments: shops/{shopkeeperUid}/customers/{customerId}/payments/{paymentId}
+        match /payments/{paymentId} {
+          allow read: if isOwner(shopkeeperUid) || (isAuthenticated() && get(/databases/$(database)/documents/shops/$(shopkeeperUid)/customers/$(customerId)).data.linkedCustomerUid == request.auth.uid);
+          allow write: if isOwner(shopkeeperUid);
+        }
+      }
+
+      // Payment Requests: shops/{shopkeeperUid}/paymentRequests/{requestId}
+      match /paymentRequests/{requestId} {
+        // Shopkeeper can read and update (accept/reject); Customer can read their own requests
+        allow read: if isOwner(shopkeeperUid) || (isAuthenticated() && (resource.data.customerUid == request.auth.uid || resource.data.customerId == request.auth.uid));
+        // Customer can create a payment request
+        allow create: if isAuthenticated();
+        // Only the shopkeeper can update status (accept/reject)
+        allow update: if isOwner(shopkeeperUid);
+        allow delete: if false;
+      }
+    }
+  }
+}
